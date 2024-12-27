@@ -4,6 +4,8 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 
+use rusqlite::{Connection, params};
+
 use chrono::prelude::*;
 use smallvec::SmallVec;
 use tokio::sync::mpsc::{self, Sender};
@@ -166,8 +168,6 @@ fn record_audit_to_file(
     audit_records: &[DnsAuditRecord],
 ) -> io::Result<()> {
     if matches!(audit_file.extension(), Some(ext) if ext == "csv") {
-        // write as csv
-
         if audit_file.peamble().is_none() {
             let mut writer = csv::Writer::from_writer(vec![]);
             writer.write_record([
@@ -211,13 +211,64 @@ fn record_audit_to_file(
                 format!("{:?}", audit.lookup_source).as_str(),
             ])?;
         }
+    } else if matches!(audit_file.extension(), Some(ext) if ext == "db") {
+        // 写入 SQLite 数据库
+        if let Err(e) = write_to_sqlite(audit_file.path(), audit_records) {
+            warn!("Failed to write audit records to SQLite database: {}", e);
+        }
     } else {
-        // write as nornmal log format.
+        // 写入普通日志格式
         for audit in audit_records {
             if writeln!(audit_file, "{}", audit).is_err() {
                 warn!("Write audit to file '{:?}' failed", audit_file.path());
             }
         }
+    }
+
+    Ok(())
+}
+
+/// 将审计记录写入 SQLite 数据库
+fn write_to_sqlite(db_path: &Path, audit_records: &[DnsAuditRecord]) -> rusqlite::Result<()> {
+    // 打开或创建数据库连接
+    let conn = Connection::open(db_path)?;
+
+    // 创建表（如果不存在）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS smartdns_audit (
+            id INTEGER PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            client TEXT NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            elapsed TEXT NOT NULL,
+            speed TEXT NOT NULL,
+            state TEXT NOT NULL,
+            result TEXT NOT NULL,
+            lookup_source TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    // 插入审计记录
+    for audit in audit_records {
+        conn.execute(
+            "INSERT INTO smartdns_audit (
+                id, timestamp, client, name, type, elapsed, speed, state, result, lookup_source
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                audit.id,
+                audit.date.timestamp(),
+                audit.client,
+                audit.query.name().to_string(),
+                audit.query.query_type().to_string(),
+                format!("{:?}", audit.elapsed),
+                format!("{:?}", audit.speed),
+                if audit.result.is_ok() { "success" } else { "failed" },
+                audit.fmt_result(),
+                format!("{:?}", audit.lookup_source),
+            ],
+        )?;
     }
 
     Ok(())
