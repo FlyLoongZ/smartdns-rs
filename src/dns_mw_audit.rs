@@ -236,7 +236,7 @@ fn write_to_sqlite(db_path: &Path, audit_records: &[DnsAuditRecord]) -> rusqlite
     // 创建表（如果不存在）
     conn.execute(
         "CREATE TABLE IF NOT EXISTS smartdns_audit (
-            id INTEGER PRIMARY KEY,
+            id INTEGER NOT NULL,
             timestamp INTEGER NOT NULL,
             client TEXT NOT NULL,
             name TEXT NOT NULL,
