@@ -49,21 +49,23 @@ impl LookupError {
 
     #[inline]
     pub fn is_soa(&self) -> bool {
-        self.as_soa().is_some()
+        if let Self::Proto(err) = self {
+            if let ProtoErrorKind::NoRecordsFound { soa: Some(_), .. } = err.kind() {
+                return true;
+            }
+        }
+        false
     }
 
-    pub fn as_soa(&self) -> Option<DnsResponse> {
+    pub fn as_soa(&self, query: &Query) -> Option<DnsResponse> {
         if let Self::Proto(err) = self {
             if let ProtoErrorKind::NoRecordsFound {
-                query,
-                soa: Some(record),
-                ..
+                soa: Some(record), ..
             } = err.kind()
             {
-                return Some(DnsResponse::new_with_max_ttl(
-                    query.as_ref().to_owned(),
-                    vec![record.as_ref().to_owned().into_record_of_rdata()],
-                )); // todo:// SOA nameservers
+                let mut dns_response = DnsResponse::new_with_max_ttl(query.to_owned(), Vec::new());
+                dns_response.add_name_server(record.as_ref().to_owned().into_record_of_rdata());
+                return Some(dns_response);
             }
         }
         None

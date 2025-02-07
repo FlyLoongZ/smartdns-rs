@@ -1,5 +1,6 @@
 use cfg_if::cfg_if;
 use ipnet::IpNet;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::File;
@@ -45,8 +46,10 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
         if let Some(ref conf) = path {
-            let path = conf.as_ref();
-
+            let mut path = Cow::Borrowed(conf.as_ref());
+            if path.is_dir() {
+                path = Cow::Owned(path.join(format!("{}.conf", crate::NAME.to_lowercase())));
+            }
             RuntimeConfig::load_from_file(path)
         } else {
             #[cfg(feature = "service")]
@@ -96,9 +99,10 @@ impl RuntimeConfig {
     }
 
     pub fn builder() -> RuntimeConfigBuilder {
-        RuntimeConfigBuilder(Config {
-            ..Default::default()
-        })
+        RuntimeConfigBuilder {
+            config: Default::default(),
+            loaded_files: Default::default(),
+        }
     }
 }
 
@@ -592,11 +596,14 @@ impl std::ops::Deref for RuntimeConfig {
     }
 }
 
-pub struct RuntimeConfigBuilder(Config);
+pub struct RuntimeConfigBuilder {
+    config: Config,
+    loaded_files: HashSet<PathBuf>,
+}
 
 impl RuntimeConfigBuilder {
     pub fn build(self) -> RuntimeConfig {
-        let mut cfg = self.0;
+        let mut cfg = self.config;
 
         if cfg.listeners.is_empty() {
             cfg.listeners.push(UdpListenerConfig::default().into())
@@ -741,14 +748,14 @@ impl std::ops::Deref for RuntimeConfigBuilder {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.config
     }
 }
 
 impl std::ops::DerefMut for RuntimeConfigBuilder {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.config
     }
 }
 
@@ -770,8 +777,8 @@ impl RuntimeConfigBuilder {
             }
             let file = File::open(path)?;
             let reader = BufReader::new(file);
-            for line in reader.lines() {
-                self.config(line?.as_str());
+            for line in reader.lines().map_while(Result::ok) {
+                self.config(line.as_str());
             }
         } else {
             warn!("configuration file {:?} does not exist", path);
@@ -843,7 +850,12 @@ impl RuntimeConfigBuilder {
                 IgnoreIp(v) => self.ignore_ip += v,
                 CaFile(v) => self.ca_file = Some(v),
                 CaPath(v) => self.ca_path = Some(v),
-                ConfFile(v) => self.load_file(v).expect("load_file failed"),
+                ConfFile(v) => {
+                    if !self.loaded_files.contains(&v) {
+                        self.load_file(v.clone()).expect("load_file failed");
+                        self.loaded_files.insert(v);
+                    }
+                }
                 DnsmasqLeaseFile(v) => self.dnsmasq_lease_file = Some(v),
                 ResolvFile(v) => self.resolv_file = Some(v),
                 SrvRecord(v) => self.srv_records.push(v),
@@ -922,16 +934,21 @@ fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) ->
     }
 
     // try to resolve absolute path by extracting its file_name
-    if let Some(new_path) = filepath.file_name().map(|f| resolve_filepath(f, base_file)) {
-        if new_path.is_file() {
-            log::warn!(
-                "File {} not found, but {} found",
-                filepath.display(),
-                new_path.display()
-            );
-            return new_path;
+    match filepath.file_name().map(Path::new) {
+        Some(new_path) if new_path != filepath => {
+            let new_path = resolve_filepath(new_path, base_file);
+            if new_path.is_file() {
+                log::warn!(
+                    "File {} not found, but {} found",
+                    filepath.display(),
+                    new_path.display()
+                );
+                return new_path;
+            }
         }
+        _ => (),
     }
+
     filepath.to_path_buf()
 }
 

@@ -109,12 +109,10 @@ pub async fn serve(
             let app = app.clone();
             https::serve(
                 app,
-                dns_handle,
                 https_listener,
-                certificate,
-                certificate_key,
-            )
-            .await?
+                dns_handle,
+                (certificate.clone(), certificate_key.clone_key()),
+            )?
         }
         #[cfg(feature = "dns-over-quic")]
         ListenerConfig::Quic(listener) => {
@@ -196,7 +194,8 @@ impl DnsHandle {
         )
     }
 
-    pub async fn send(&self, message: SerialMessage) -> SerialMessage {
+    pub async fn send<T: Into<SerialMessage>>(&self, message: T) -> SerialMessage {
+        let message = message.into();
         let (tx, rx) = oneshot::channel();
 
         if let Err(err) = self.sender.send((message, self.opts.clone(), tx)).await {

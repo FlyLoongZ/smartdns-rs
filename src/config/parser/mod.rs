@@ -211,6 +211,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("domain"), OneConfig::Domain),
         map(parse_item("hosts-file"), OneConfig::HostsFile),
         map(parse_item("https-record"), OneConfig::HttpsRecord),
+        map(parse_item("ignore-ip"), OneConfig::IgnoreIp),
         map(parse_item("local-ttl"), OneConfig::LocalTtl),
         map(parse_item("log-console"), OneConfig::LogConsole),
         map(parse_item("log-file-mode"), OneConfig::LogFileMode),
@@ -347,6 +348,18 @@ mod tests {
                 OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
                     name: "outbound".to_string(),
                     file: Path::new("/etc/smartdns/geoip.txt").to_path_buf(),
+                    content_type: Default::default(),
+                }))
+            )
+        );
+
+        assert_eq!(
+            parse_config("domain-set -n proxy-server -f proxy-server-list.txt").unwrap(),
+            (
+                "",
+                OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
+                    name: "proxy-server".to_string(),
+                    file: Path::new("proxy-server-list.txt").to_path_buf(),
                     content_type: Default::default(),
                 }))
             )
