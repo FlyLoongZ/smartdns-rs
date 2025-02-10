@@ -7,6 +7,7 @@ use std::time::Instant;
 use chrono::prelude::*;
 use smallvec::SmallVec;
 use tokio::sync::mpsc::{self, Sender};
+use rusqlite::{Connection, Result, params};
 
 use crate::dns::*;
 use crate::infra::mapped_file::MappedFile;
